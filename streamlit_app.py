@@ -414,4 +414,3 @@ with tab_cauti:
         if not u_symptom_any: reasons.append("No eligible symptom within IWP.")
         if reasons:
             st.caption("Reason(s) criteria not met: " + " ".join(reasons))
-``
