@@ -5,9 +5,9 @@ from typing import Optional
 # ------------------------------------------------------------
 # CLABSI & CAUTI Risk Calculator (NHSN-aligned device-day logic)
 # - Calendar days: insertion day = Day 1; device eligible on Day 3 (>2 days)
-# - Device association: in place on DOE or removed the calendar day before DOE
+# - Device association: in place on the assessment date or removed the calendar day before
 # - IWP: 7 days (anchor ±3). For CAUTI, urine culture anchors IWP.
-# - Inference FIX: If a device is removed ON the DOE, it WAS in place on DOE.
+# - Inference FIX: If a device is removed ON the assessment date, it WAS in place on that date.
 # ------------------------------------------------------------
 
 st.set_page_config(
@@ -37,11 +37,14 @@ def inclusive_days(start: dt.date, end: dt.date) -> int:
 def iwp_range_text(anchor: Optional[dt.date]) -> str:
     """Return a pretty IWP string like '(IWP: Jan 02, 2026 – Jan 08, 2026)'."""
     if not anchor:
-        return "(set DOE or culture date)"
+        return "(set assessment date or culture date)"
     start = anchor - dt.timedelta(days=3)
     end = anchor + dt.timedelta(days=3)
     fmt = "%b %d, %Y"
     return f"(IWP: {start.strftime(fmt)} – {end.strftime(fmt)})"
+
+def c_to_f(c: float) -> float:
+    return (c * 9/5) + 32
 
 IWP_RULE = (
     "IWP = 7 days. The infection window period includes the date of the first positive diagnostic test "
@@ -49,7 +52,7 @@ IWP_RULE = (
 )
 
 DEVICE_ASSOC_RULE = (
-    "Device association: device must be in place on the DOE, or removed the calendar day before the DOE."
+    "Device association: device must be in place on the assessment date, or removed the calendar day before the assessment date."
 )
 
 CAUTI_IWP_RULE = (
@@ -57,12 +60,16 @@ CAUTI_IWP_RULE = (
     "(urine culture date ±3)."
 )
 
+TEMP_RULE = (
+    "Use the highest documented temperature during the IWP. Fever threshold is strictly > 38 °C (> 100.4 °F)."
+)
+
 # =========================
 # ========= CLABSI ========
 # =========================
 with tab_clabsi:
     st.header("CLABSI")
-    st.write("Enter patient information to calculate CLABSI risk.")
+    st.write("Enter patient information to calculate CLABSI risk and determine if CLABSI criteria are met.")
 
     # --- Dates & device presence/removal ---
     cl_insertion_date = st.date_input(
@@ -72,14 +79,14 @@ with tab_clabsi:
     )
 
     cl_eval_date = st.date_input(
-        "Date of evaluation (DOE)",
+        "Assessment date",
         value=dt.date.today(),
-        help="DOE = the date the first element used to meet CLABSI criterion occurs (within IWP)."
+        help="Assessment date = the date the first element used to meet CLABSI criterion occurs (within IWP)."
     )
 
     cl_in_place = (
         st.radio(
-            "Is the central line in place on the DOE?",
+            "Is the central line in place on the assessment date?",
             ["Yes", "No"],
             help=DEVICE_ASSOC_RULE
         ) == "Yes"
@@ -91,7 +98,8 @@ with tab_clabsi:
             "Central line removal date",
             min_value=cl_insertion_date,
             max_value=cl_eval_date,
-            help="If removed yesterday (DOE-1), still device-associated. If removed on DOE, it WAS in place on the DOE."
+            help="If removed yesterday (assessment date − 1), still device-associated. "
+                 "If removed on the assessment date, it WAS in place on the assessment date."
         )
 
     # Optional: first positive blood culture date (IWP anchor for BSI)
@@ -110,18 +118,18 @@ with tab_clabsi:
     else:
         cl_bcx_date = None
 
-    # --- NHSN inference: if removed ON the DOE, device WAS in place on DOE ---
+    # --- NHSN inference: if removed ON the assessment date, device WAS in place on that date ---
     if not cl_in_place and cl_removal_date and cl_removal_date == cl_eval_date:
-        cl_in_place = True  # infer in place on DOE
+        cl_in_place = True  # infer in place on assessment date
 
     # --- Validate & compute device days ---
     problems = []
     cl_effective_end = cl_eval_date if cl_in_place else (cl_removal_date or cl_eval_date)
 
     if cl_insertion_date > cl_eval_date:
-        problems.append("Insertion date cannot be after the evaluation/DOE.")
+        problems.append("Insertion date cannot be after the assessment date.")
     if cl_insertion_date > cl_effective_end:
-        problems.append("Insertion date cannot be after the removal/evaluation date.")
+        problems.append("Insertion date cannot be after the removal/assessment date.")
 
     if problems:
         for p in problems:
@@ -131,7 +139,7 @@ with tab_clabsi:
     cl_days = inclusive_days(cl_insertion_date, cl_effective_end)
     cl_eligible = cl_days > 2  # Eligible starting Day 3
 
-    # Device association: in place on DOE OR removed yesterday
+    # Device association: in place on assessment date OR removed yesterday
     if cl_in_place:
         cl_device_associated = True
     else:
@@ -139,18 +147,21 @@ with tab_clabsi:
             cl_removal_date == cl_eval_date - dt.timedelta(days=1)
         )
 
-    # IWP anchor for display (blood culture preferred; fallback to DOE)
+    # IWP anchor for display (blood culture preferred; fallback to assessment date)
     cl_iwp_anchor = cl_bcx_date or cl_eval_date
     cl_iwp_label = iwp_range_text(cl_iwp_anchor)
 
     # --- Clinical inputs with IWP shown ---
-    fever = (
-        st.radio(
-            f"Fever (≥ 38°C / 100.4°F)? {cl_iwp_label}",
-            ["Yes", "No"],
-            help=IWP_RULE
-        ) == "Yes"
+    # Numeric temperature input (strictly > 38 °C)
+    cl_temp_c = st.number_input(
+        f"Highest documented temperature during IWP? (°C)  (> 38 °C / > 100.4 °F) {cl_iwp_label}",
+        min_value=30.0, max_value=45.0, value=37.0, step=0.1, format="%.1f",
+        help=TEMP_RULE
     )
+    st.caption(f"Entered temperature ≈ **{c_to_f(cl_temp_c):.1f} °F**")
+    cl_fever = (cl_temp_c > 38.0)
+
+    # Additional clinical context (not required for CLABSI criterion)
     hypotension = (
         st.radio(
             f"Hypotension present? {cl_iwp_label}",
@@ -165,6 +176,7 @@ with tab_clabsi:
             help=IWP_RULE
         ) == "Yes"
     )
+
     positive_bcx = (
         st.radio(
             "Positive blood culture?",
@@ -173,30 +185,19 @@ with tab_clabsi:
         ) == "Yes"
     )
 
-    cl_symptom_any = fever or chills or hypotension
+    # Build an 'at risk' signal for CLABSI based on symptoms (even though symptoms are not required to meet CLABSI)
+    cl_symptom_any = cl_fever or hypotension or chills
 
     # ====== Criteria determination (CLABSI) ======
-    # For adult CLABSI per NHSN: positive blood culture + eligible device days + device-associated.
-    # (Symptoms are not required to meet CLABSI, but indicate risk.)
+    # NHSN CLABSI (adult): positive blood culture + eligible device days + device-associated.
     meets_clabsi_criteria = (
         positive_bcx and cl_eligible and cl_device_associated
     )
 
-    # Criteria-first messaging
-    if meets_clabsi_criteria:
-        cl_msg = "Patient meets NHSN CLABSI Criteria (as of DOE)"
-        cl_banner = "error"  # red banner to emphasize criteria met
-    elif cl_symptom_any:
-        cl_msg = "At risk – Monitor closely and consider blood cultures"
-        cl_banner = "warning"
-    else:
-        cl_msg = "Low Risk"
-        cl_banner = "info"
-
     # Output
     st.subheader("CLABSI Results")
     st.markdown(f"Insertion date: **{cl_insertion_date.isoformat()}**")
-    st.markdown(f"Evaluation date (DOE): **{cl_eval_date.isoformat()}**")
+    st.markdown(f"Assessment date: **{cl_eval_date.isoformat()}**")
     if cl_removal_date:
         st.markdown(f"Central line removal date: **{cl_removal_date.isoformat()}**")
     if cl_bcx_date:
@@ -206,21 +207,22 @@ with tab_clabsi:
                 "(7 day window: anchor date ± 3 days)")
     st.markdown(f"Central line days (calendar days): **{cl_days}**")
     st.markdown(f"NHSN device-day eligibility (>2 consecutive calendar days): **{cl_eligible}**")
-    st.markdown(f"Device association (in place on DOE or removed yesterday): **{cl_device_associated}**")
+    st.markdown(f"Device association (in place on assessment date or removed yesterday): **{cl_device_associated}**")
 
-    if cl_banner == "error":
-        st.error(cl_msg)
-    elif cl_banner == "warning":
-        st.warning(cl_msg)
+    # Three-state highlighting: Red (meets), Yellow (at risk with symptoms), Green (does not meet and no symptoms)
+    if meets_clabsi_criteria:
+        st.error("Patient **meets** NHSN CLABSI Criteria (as of assessment date).")
+    elif cl_symptom_any:
+        st.warning("**At risk** — symptoms within IWP; continue evaluation and monitoring.")
     else:
-        st.info(cl_msg)
+        st.success("Patient **does not meet** NHSN CLABSI Criteria (as of assessment date).")
 
     # Diagnostics: why not criteria?
     if not meets_clabsi_criteria:
         reasons = []
         if not positive_bcx: reasons.append("No positive blood culture.")
-        if not cl_eligible: reasons.append("Not eligible (>2 central-line days) by DOE (eligible starting Day 3).")
-        if not cl_device_associated: reasons.append("Not device-associated (not in place on DOE or removed day before).")
+        if not cl_eligible: reasons.append("Not eligible (>2 central-line days) by assessment date (eligible starting Day 3).")
+        if not cl_device_associated: reasons.append("Not device-associated (not in place on assessment date or removed day before).")
         if reasons:
             st.caption("Reason(s) criteria not met: " + " ".join(reasons))
 
@@ -229,7 +231,7 @@ with tab_clabsi:
 # =========================
 with tab_cauti:
     st.header("CAUTI")
-    st.write("Enter urinary catheter information and symptoms for CAUTI risk.")
+    st.write("Enter urinary catheter information and symptoms for CAUTI risk and determination.")
 
     # --- Dates & device presence/removal ---
     cauti_insertion_date = st.date_input(
@@ -239,14 +241,14 @@ with tab_cauti:
     )
 
     cauti_eval_date = st.date_input(
-        "Date of evaluation (DOE)",
+        "Assessment date",
         value=dt.date.today(),
-        help="DOE = date the first element used to meet the UTI/CAUTI criterion occurs (within IWP)."
+        help="Assessment date = the date the first element used to meet the UTI/CAUTI criterion occurs (within IWP)."
     )
 
     cauti_in_place = (
         st.radio(
-            "Is the indwelling urinary catheter in place on the DOE?",
+            "Is the indwelling urinary catheter in place on the assessment date?",
             ["Yes", "No"],
             help=DEVICE_ASSOC_RULE
         ) == "Yes"
@@ -258,8 +260,8 @@ with tab_cauti:
         value=cauti_eval_date,
         min_value=cauti_insertion_date,
         max_value=cauti_eval_date,
-        help="If removed yesterday (DOE-1), event can still be CAUTI-associated. "
-             "If removed on DOE, it WAS in place on the DOE.",
+        help="If removed yesterday (assessment date − 1), event can still be CAUTI-associated. "
+             "If removed on the assessment date, it WAS in place on the assessment date.",
         disabled=cauti_in_place
     )
 
@@ -279,18 +281,18 @@ with tab_cauti:
     else:
         cauti_ucx_date = None
 
-    # --- NHSN inference: if removed ON the DOE, device WAS in place on DOE ---
+    # --- NHSN inference: if removed ON the assessment date, device WAS in place on that date ---
     if not cauti_in_place and cauti_removal_date and cauti_removal_date == cauti_eval_date:
-        cauti_in_place = True  # infer in place on DOE
+        cauti_in_place = True  # infer in place on assessment date
 
     # --- Validate & compute device days ---
     problems = []
     effective_end = cauti_eval_date if cauti_in_place else cauti_removal_date
 
     if cauti_insertion_date > cauti_eval_date:
-        problems.append("Insertion date cannot be after the evaluation/DOE.")
+        problems.append("Insertion date cannot be after the assessment date.")
     if cauti_insertion_date > effective_end:
-        problems.append("Insertion date cannot be after the removal/evaluation date.")
+        problems.append("Insertion date cannot be after the removal/assessment date.")
 
     if problems:
         for p in problems:
@@ -300,28 +302,34 @@ with tab_cauti:
     cauti_days = inclusive_days(cauti_insertion_date, effective_end)
     cauti_eligible_days = cauti_days > 2  # Eligible starting Day 3
 
-    # Device association: in place on DOE OR removed yesterday
+    # Device association: in place on assessment date OR removed yesterday
     if cauti_in_place:
         cauti_device_associated = True
     else:
         cauti_device_associated = (cauti_removal_date == cauti_eval_date - dt.timedelta(days=1))
 
-    # IWP anchor for CAUTI (urine culture preferred; fallback to DOE)
+    # IWP anchor for CAUTI (urine culture preferred; fallback to assessment date)
     cauti_iwp_anchor = cauti_ucx_date or cauti_eval_date
     cauti_iwp_label = iwp_range_text(cauti_iwp_anchor)
 
     st.divider()
     st.subheader("Signs & Symptoms")
     st.caption(
-        "When an indwelling catheter is in place on symptom onset, eligible symptoms are fever (≥38 °C), "
+        "When an indwelling catheter is in place on symptom onset, eligible symptoms are fever (>38 °C), "
         "suprapubic tenderness, and CVA pain/tenderness. Urgency, frequency, and dysuria apply only when "
         "the catheter has been removed."
     )
 
-    # --- Symptoms (respect catheter status on DOE) ---
-    fever_u = (
-        st.radio(f"Fever (≥ 38 °C / 100.4 °F)? {cauti_iwp_label}", ["Yes", "No"], help=CAUTI_IWP_RULE) == "Yes"
+    # --- Numeric temperature input (strict > 38 °C threshold) ---
+    u_temp_c = st.number_input(
+        f"Highest documented temperature during IWP? (°C)  (> 38 °C / > 100.4 °F) {cauti_iwp_label}",
+        min_value=30.0, max_value=45.0, value=37.0, step=0.1, format="%.1f",
+        help=TEMP_RULE
     )
+    st.caption(f"Entered temperature ≈ **{c_to_f(u_temp_c):.1f} °F**")
+    fever_u = (u_temp_c > 38.0)
+
+    # --- Symptoms (respect catheter status on assessment date) ---
     suprapubic = (
         st.radio(f"Suprapubic tenderness? {cauti_iwp_label}", ["Yes", "No"], help=CAUTI_IWP_RULE) == "Yes"
     )
@@ -342,10 +350,10 @@ with tab_cauti:
                  help="Only eligible after catheter removal; exclude when IUC is in place.") == "Yes"
     )
 
-    # Enforce NHSN symptom eligibility based on catheter status on DOE
+    # Enforce NHSN symptom eligibility based on catheter status on assessment date
     if cauti_in_place:
         urgency = frequency = dysuria = False
-        st.info("Catheter is in place on DOE: urgency, frequency, and dysuria are excluded by NHSN.")
+        st.info("Catheter is in place on the assessment date: urgency, frequency, and dysuria are excluded by NHSN.")
     else:
         urgency, frequency, dysuria = urgency_raw, frequency_raw, dysuria_raw
 
@@ -368,22 +376,10 @@ with tab_cauti:
         u_symptom_any
     )
 
-    # Criteria-first messaging
-    if meets_cauti_criteria:
-        u_msg = "Patient meets NHSN CAUTI Criteria (as of DOE)"
-        u_banner = "error"  # red
-    elif u_symptom_any:
-        u_msg = "At risk – Monitor closely and consider urine culture"
-        u_banner = "warning"
-    else:
-        u_msg = "Low Risk"
-        u_banner = "info"
-
     # Output
     st.subheader("CAUTI Results")
     st.markdown(f"Insertion date: **{cauti_insertion_date.isoformat()}**")
-    st.markdown(f"Evaluation date (DOE): **{cauti_eval_date.isoformat()}**")
-    # Show removal date if provided by user (even if inferred as 'in place' for DOE)
+    st.markdown(f"Assessment date: **{cauti_eval_date.isoformat()}**")
     if cauti_removal_date:
         st.markdown(f"Catheter removal date: **{cauti_removal_date.isoformat()}**")
     if cauti_ucx_date:
@@ -393,21 +389,22 @@ with tab_cauti:
                 "(7 day window: anchor date ± 3 days; for UTI/CAUTI, the urine culture sets the IWP)")
     st.markdown(f"Catheter days (calendar days): **{cauti_days}**")
     st.markdown(f"NHSN catheter-day eligibility (> 2 consecutive calendar days): **{cauti_eligible_days}**")
-    st.markdown(f"Device association (in place on DOE or removed yesterday): **{cauti_device_associated}**")
+    st.markdown(f"Device association (in place on assessment date or removed yesterday): **{cauti_device_associated}**")
 
-    if u_banner == "error":
-        st.error(u_msg)
-    elif u_banner == "warning":
-        st.warning(u_msg)
+    # Three-state highlighting: Red (meets), Yellow (at risk with symptoms), Green (does not meet and no symptoms)
+    if meets_cauti_criteria:
+        st.error("Patient **meets** NHSN CAUTI Criteria (as of assessment date).")
+    elif u_symptom_any:
+        st.warning("**At risk** — symptoms within IWP; continue evaluation and monitoring.")
     else:
-        st.info(u_msg)
+        st.success("Patient **does not meet** NHSN CAUTI Criteria (as of assessment date).")
 
     # Diagnostics: why not criteria?
     if not meets_cauti_criteria:
         reasons = []
         if not positive_ucx: reasons.append("No positive urine culture.")
-        if not cauti_eligible_days: reasons.append("Not eligible (>2 catheter-days) by DOE (eligible starting Day 3).")
-        if not cauti_device_associated: reasons.append("Not device-associated (not in place on DOE or removed day before).")
+        if not cauti_eligible_days: reasons.append("Not eligible (>2 catheter-days) by assessment date (eligible starting Day 3).")
+        if not cauti_device_associated: reasons.append("Not device-associated (not in place on assessment date or removed day before).")
         if not u_symptom_any: reasons.append("No eligible symptom within IWP.")
         if reasons:
             st.caption("Reason(s) criteria not met: " + " ".join(reasons))
