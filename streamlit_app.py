@@ -16,14 +16,16 @@ st.set_page_config(
     layout="centered"
 )
 
+# ===== Leadership wording (single place to change) =====
+BLOOD_LEADERSHIP_LABEL = "TIMC Leadership"   # change to "Unit Leadership" if desired
+URINE_LEADERSHIP_LABEL = "Unit Leadership"   # per your request
+
 st.title("💉 CLABSI & CAUTI Risk Calculator")
 st.caption(
     "Device days use calendar-day counting (insertion day = Day 1; eligible on Day 3). "
     "IWP is 7 days anchored on the first positive diagnostic test (anchor ± 3). "
     "For UTI/CAUTI, the urine culture anchors the IWP."
 )
-
-tab_clabsi, tab_cauti = st.tabs(["CLABSI", "CAUTI"])
 
 # --------------------------
 # Shared helpers
@@ -66,6 +68,84 @@ CAUTI_IWP_RULE = (
 TEMP_RULE = (
     "Enter the highest documented temperature during the IWP in °F. Fever threshold is strictly > 38 °C (> 100.4 °F). "
     "The app converts °F → °C and applies the strict > 38 °C rule."
+)
+
+# --------------------------
+# New: Escalation tab renderers
+# --------------------------
+def render_blood_culture_escalation(leadership_label: str = BLOOD_LEADERSHIP_LABEL) -> None:
+    st.header("Blood Culture Escalation")
+    st.write("Use this quick pathway to determine whether to obtain a blood culture or escalate for leadership review.")
+
+    q1_has_cvc = st.radio("Does the patient currently have a CVC?", ["Yes", "No"], horizontal=True)
+
+    if q1_has_cvc == "Yes":
+        q2_recent_admit = st.radio(
+            "Was the patient admitted to TIMC less than 2 calendar days ago?",
+            ["Yes", "No"], horizontal=True,
+            help="Use calendar days; admission day counts as Day 1."
+        )
+        if q2_recent_admit == "Yes":
+            st.success(f"Acquire blood culture — escalation to {leadership_label} not needed.")
+        else:
+            st.warning(f"Contact {leadership_label} to assist in clinical necessity.")
+    else:
+        q3_recent_cvc = st.radio(
+            "Did the patient have a CVC within the last 3 calendar days?",
+            ["Yes", "No"], horizontal=True
+        )
+        if q3_recent_cvc == "Yes":
+            st.warning(f"Contact {leadership_label} to assist in clinical necessity.")
+        else:
+            st.success(f"Acquire blood culture — escalation to {leadership_label} not needed.")
+
+    with st.expander("Things to Remember"):
+        st.markdown(
+            "- Does the patient have a wound? If yes, consider a wound culture.\n"
+            "- Has the patient had any fevers greater than 100.4 °F?\n"
+            "- Has the patient been hypotensive or tachycardic?\n"
+            "- Any other known sources of infection?"
+        )
+
+def render_urine_culture_escalation(leadership_label: str = URINE_LEADERSHIP_LABEL) -> None:
+    st.header("Urine Culture Escalation")
+    st.write("Use this pathway to guide appropriate urine culture ordering and when to involve unit leadership.")
+
+    q1_has_foley = st.radio("Does the patient currently have a Foley catheter?", ["Yes", "No"], horizontal=True)
+
+    if q1_has_foley == "Yes":
+        q2_recent_admit = st.radio(
+            "Was the patient admitted or transferred less than 2 calendar days ago?",
+            ["Yes", "No"], horizontal=True,
+            help="Use calendar days; admission/transfer day counts as Day 1."
+        )
+        if q2_recent_admit == "Yes":
+            st.success(f"Acquire urine culture — escalation to {leadership_label} not needed.")
+        else:
+            st.warning(f"Contact {leadership_label} to assist with determining clinical necessity.")
+    else:
+        q3_recent_foley = st.radio(
+            "Did the patient have a Foley catheter within the last 3 calendar days?",
+            ["Yes", "No"], horizontal=True
+        )
+        if q3_recent_foley == "Yes":
+            st.warning(f"Contact {leadership_label} to assist with determining clinical necessity.")
+        else:
+            st.success(f"Acquire urine culture — escalation to {leadership_label} not needed.")
+
+    with st.expander("Things to Remember"):
+        st.markdown(
+            "- Are urinary symptoms present (dysuria, suprapubic pain, flank pain)?\n"
+            "- Any systemic signs (fever, hypotension, tachycardia)?\n"
+            "- Could this represent asymptomatic bacteriuria?\n"
+            "- Is there another identifiable source of infection?"
+        )
+
+# ============================================================
+# ======================= MAIN TABS ==========================
+# ============================================================
+tab_clabsi, tab_cauti, tab_blood, tab_urine = st.tabs(
+    ["CLABSI", "CAUTI", "Blood Culture Escalation", "Urine Culture Escalation"]
 )
 
 # =========================
@@ -414,3 +494,15 @@ with tab_cauti:
         if not u_symptom_any: reasons.append("No eligible symptom within IWP.")
         if reasons:
             st.caption("Reason(s) criteria not met: " + " ".join(reasons))
+
+# =============================
+# == Blood Culture Escalation ==
+# =============================
+with tab_blood:
+    render_blood_culture_escalation(BLOOD_LEADERSHIP_LABEL)
+
+# =============================
+# == Urine Culture Escalation ==
+# =============================
+with tab_urine:
+    render_urine_culture_escalation(URINE_LEADERSHIP_LABEL)
