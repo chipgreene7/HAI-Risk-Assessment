@@ -91,13 +91,21 @@ def render_blood_culture_escalation(leadership_label: str = BLOOD_LEADERSHIP_LAB
     st.header("Blood Culture Escalation")
     st.write("Use this quick pathway to determine whether to obtain a blood culture or escalate for leadership review.")
 
-    q1_has_cvc = st.radio("Does the patient currently have a CVC?", ["Yes", "No"], horizontal=True)
+    # ✅ Unique keys to ensure no collisions if labels are reused elsewhere
+    q1_has_cvc = st.radio(
+        "Does the patient currently have a CVC?",
+        ["Yes", "No"],
+        horizontal=True,
+        key="blood_q1_has_cvc",
+    )
 
     if q1_has_cvc == "Yes":
         q2_recent_admit = st.radio(
             "Was the patient admitted to TIMC less than 2 calendar days ago?",
-            ["Yes", "No"], horizontal=True,
-            help="Use calendar days; admission day counts as Day 1."
+            ["Yes", "No"],
+            horizontal=True,
+            help="Use calendar days; admission day counts as Day 1.",
+            key="blood_q2_recent_admit",
         )
         if q2_recent_admit == "Yes":
             st.success(f"Acquire blood culture — escalation to {leadership_label} not needed.")
@@ -106,7 +114,9 @@ def render_blood_culture_escalation(leadership_label: str = BLOOD_LEADERSHIP_LAB
     else:
         q3_recent_cvc = st.radio(
             "Did the patient have a CVC within the last 3 calendar days?",
-            ["Yes", "No"], horizontal=True
+            ["Yes", "No"],
+            horizontal=True,
+            key="blood_q3_recent_cvc",
         )
         if q3_recent_cvc == "Yes":
             st.warning(f"Contact {leadership_label} to assist in clinical necessity.")
@@ -125,13 +135,20 @@ def render_urine_culture_escalation(leadership_label: str = URINE_LEADERSHIP_LAB
     st.header("Urine Culture Escalation")
     st.write("Use this pathway to guide appropriate urine culture ordering and when to involve unit leadership.")
 
-    q1_has_foley = st.radio("Does the patient currently have a Foley catheter?", ["Yes", "No"], horizontal=True)
+    q1_has_foley = st.radio(
+        "Does the patient currently have a Foley catheter?",
+        ["Yes", "No"],
+        horizontal=True,
+        key="urine_q1_has_foley",
+    )
 
     if q1_has_foley == "Yes":
         q2_recent_admit = st.radio(
             "Was the patient admitted or transferred less than 2 calendar days ago?",
-            ["Yes", "No"], horizontal=True,
-            help="Use calendar days; admission/transfer day counts as Day 1."
+            ["Yes", "No"],
+            horizontal=True,
+            help="Use calendar days; admission/transfer day counts as Day 1.",
+            key="urine_q2_recent_admit",
         )
         if q2_recent_admit == "Yes":
             st.success(f"Acquire urine culture — escalation to {leadership_label} not needed.")
@@ -140,7 +157,9 @@ def render_urine_culture_escalation(leadership_label: str = URINE_LEADERSHIP_LAB
     else:
         q3_recent_foley = st.radio(
             "Did the patient have a Foley catheter within the last 3 calendar days?",
-            ["Yes", "No"], horizontal=True
+            ["Yes", "No"],
+            horizontal=True,
+            key="urine_q3_recent_foley",
         )
         if q3_recent_foley == "Yes":
             st.warning(f"Contact {leadership_label} to assist with determining clinical necessity.")
@@ -162,31 +181,38 @@ def render_clabsi_tab():
     st.header("CLABSI")
     st.write("Enter patient information to calculate CLABSI risk and determine if CLABSI criteria are met.")
 
-    # Gate calculations until the user explicitly opts in
-    enable = st.toggle("Enter dates now", value=False, help="Turn on to input dates and run the calculator.")
+    # ✅ Unique key to avoid duplicate element id for a toggle with the same label in another tab
+    enable = st.toggle(
+        "Enter dates now",
+        value=False,
+        help="Turn on to input dates and run the calculator.",
+        key="clabsi_enable"
+    )
     if not enable:
         st.info("Turn on **Enter dates now** to input dates. Other tabs (including Escalation) remain available.")
         return
 
-    # NOTE: If your Streamlit version supports value=None for date_input, you can switch to value=None
-    # to force explicit selection. Keeping today avoids version incompatibilities.
+    # If your Streamlit supports value=None for date_input, you can set value=None and guard for None.
     cl_insertion_date = st.date_input(
         "Central line insertion date",
         value=dt.date.today(),
-        help="Insertion day counts as Day 1 (calendar days). Eligible starting Day 3 (>2 days)."
+        help="Insertion day counts as Day 1 (calendar days). Eligible starting Day 3 (>2 days).",
+        key="clabsi_insertion_date"
     )
 
     cl_eval_date = st.date_input(
         "Assessment date",
         value=dt.date.today(),
-        help="Assessment date = the date the first element used to meet CLABSI criterion occurs (within IWP)."
+        help="Assessment date = the date the first element used to meet CLABSI criterion occurs (within IWP).",
+        key="clabsi_assessment_date"
     )
 
     cl_in_place = (
         st.radio(
             "Is the central line in place on the assessment date?",
             ["Yes", "No"],
-            help=DEVICE_ASSOC_RULE
+            help=DEVICE_ASSOC_RULE,
+            key="clabsi_in_place"
         ) == "Yes"
     )
 
@@ -197,30 +223,30 @@ def render_clabsi_tab():
             min_value=cl_insertion_date,
             max_value=cl_eval_date,
             help="If removed yesterday (assessment date − 1), still device-associated. "
-                 "If removed on the assessment date, it WAS in place on the assessment date."
+                 "If removed on the assessment date, it WAS in place on the assessment date.",
+            key="clabsi_removal_date"
         )
 
-    # Optional: first positive blood culture date (IWP anchor for BSI)
     st.markdown("**Microbiology timing (optional, improves IWP accuracy)**")
     use_bcx_date = st.checkbox(
         "Specify first positive blood culture collection date",
         value=False,
-        help=IWP_RULE
+        help=IWP_RULE,
+        key="clabsi_use_bcx_date"
     )
     if use_bcx_date:
         cl_bcx_date = st.date_input(
             "First positive blood culture collection date",
             value=cl_eval_date,
-            help=IWP_RULE
+            help=IWP_RULE,
+            key="clabsi_bcx_date"
         )
     else:
         cl_bcx_date = None
 
-    # --- NHSN inference: if removed ON the assessment date, device WAS in place on that date ---
     if not cl_in_place and cl_removal_date and cl_removal_date == cl_eval_date:
         cl_in_place = True  # infer in place on assessment date
 
-    # --- Validate & compute device days (non-blocking) ---
     problems = []
     cl_effective_end = cl_eval_date if cl_in_place else (cl_removal_date or cl_eval_date)
 
@@ -235,7 +261,6 @@ def render_clabsi_tab():
     cl_days = inclusive_days(cl_insertion_date, cl_effective_end)
     cl_eligible = cl_days > 2  # Eligible starting Day 3
 
-    # Device association: in place on assessment date OR removed yesterday
     if cl_in_place:
         cl_device_associated = True
     else:
@@ -243,33 +268,33 @@ def render_clabsi_tab():
             cl_removal_date == cl_eval_date - dt.timedelta(days=1)
         )
 
-    # IWP anchor for display (blood culture preferred; fallback to assessment date)
     cl_iwp_anchor = cl_bcx_date or cl_eval_date
     cl_iwp_label = iwp_range_text(cl_iwp_anchor)
 
-    # --- Clinical inputs with IWP shown ---
     cl_temp_f = st.number_input(
         f"Highest documented temperature during IWP? (°F)  (> 100.4 °F / > 38 °C) {cl_iwp_label}",
         min_value=80.0, max_value=113.0, value=98.6, step=0.1, format="%.1f",
-        help=TEMP_RULE
+        help=TEMP_RULE,
+        key="clabsi_temp_f"
     )
     cl_temp_c = f_to_c(cl_temp_f)
     st.caption(f"Entered temperature ≈ **{cl_temp_c:.1f} °C**")
     cl_fever = (cl_temp_c > 38.0)
 
-    # Additional clinical context (not required for CLABSI criterion)
     hypotension = (
         st.radio(
             f"Hypotension present? {cl_iwp_label}",
             ["Yes", "No"],
-            help=IWP_RULE
+            help=IWP_RULE,
+            key="clabsi_hypotension"
         ) == "Yes"
     )
     chills = (
         st.radio(
             f"Chills present? {cl_iwp_label}",
             ["Yes", "No"],
-            help=IWP_RULE
+            help=IWP_RULE,
+            key="clabsi_chills"
         ) == "Yes"
     )
 
@@ -277,17 +302,15 @@ def render_clabsi_tab():
         st.radio(
             "Positive blood culture?",
             ["Yes", "No"],
-            help="Positive blood culture is required (with eligibility and device association) to meet CLABSI criteria."
+            help="Positive blood culture is required (with eligibility and device association) to meet CLABSI criteria.",
+            key="clabsi_positive_bcx"
         ) == "Yes"
     )
 
-    # Symptoms signal (even though not required to meet CLABSI)
     cl_symptom_any = cl_fever or hypotension or chills
 
-    # ====== Criteria determination (CLABSI) ======
     meets_clabsi_criteria = (positive_bcx and cl_eligible and cl_device_associated)
 
-    # Output
     st.subheader("CLABSI Results")
     st.markdown(f"Insertion date: **{cl_insertion_date.isoformat()}**")
     st.markdown(f"Assessment date: **{cl_eval_date.isoformat()}**")
@@ -301,7 +324,6 @@ def render_clabsi_tab():
     st.markdown(f"NHSN device-day eligibility (>2 consecutive calendar days): **{cl_eligible}**")
     st.markdown(f"Device association (in place on assessment date or removed yesterday): **{cl_device_associated}**")
 
-    # Three-state highlighting
     if meets_clabsi_criteria:
         st.error("Patient **meets** NHSN CLABSI Criteria (as of assessment date).")
     elif cl_symptom_any:
@@ -309,7 +331,6 @@ def render_clabsi_tab():
     else:
         st.success("Patient **does not meet** NHSN CLABSI Criteria (as of assessment date).")
 
-    # Diagnostics: why not criteria?
     if not meets_clabsi_criteria:
         reasons = []
         if not positive_bcx: reasons.append("No positive blood culture.")
@@ -322,34 +343,40 @@ def render_cauti_tab():
     st.header("CAUTI")
     st.write("Enter urinary catheter information and symptoms for CAUTI risk and determination.")
 
-    # Gate calculations until the user explicitly opts in
-    enable = st.toggle("Enter dates now", value=False, help="Turn on to input dates and run the calculator.")
+    # ✅ Unique key; prevents collision with the CLABSI toggle
+    enable = st.toggle(
+        "Enter dates now",
+        value=False,
+        help="Turn on to input dates and run the calculator.",
+        key="cauti_enable"
+    )
     if not enable:
         st.info("Turn on **Enter dates now** to input dates. Other tabs (including Escalation) remain available.")
         return
 
-    # If your Streamlit supports empty date pickers, you can use value=None for both inputs.
     cauti_insertion_date = st.date_input(
         "Indwelling urinary catheter insertion date",
         value=dt.date.today(),
-        help="Insertion day counts as Day 1. Eligible starting Day 3 (>2 days)."
+        help="Insertion day counts as Day 1. Eligible starting Day 3 (>2 days).",
+        key="cauti_insertion_date"
     )
 
     cauti_eval_date = st.date_input(
         "Assessment date",
         value=dt.date.today(),
-        help="Assessment date = the date the first element used to meet the UTI/CAUTI criterion occurs (within IWP)."
+        help="Assessment date = the date the first element used to meet the UTI/CAUTI criterion occurs (within IWP).",
+        key="cauti_assessment_date"
     )
 
     cauti_in_place = (
         st.radio(
             "Is the indwelling urinary catheter in place on the assessment date?",
             ["Yes", "No"],
-            help=DEVICE_ASSOC_RULE
+            help=DEVICE_ASSOC_RULE,
+            key="cauti_in_place"
         ) == "Yes"
     )
 
-    # Always show removal date; disable if still in place
     cauti_removal_date = st.date_input(
         "Date of catheter removal",
         value=cauti_eval_date,
@@ -357,30 +384,30 @@ def render_cauti_tab():
         max_value=cauti_eval_date,
         help="If removed yesterday (assessment date − 1), event can still be CAUTI-associated. "
              "If removed on the assessment date, it WAS in place on the assessment date.",
-        disabled=cauti_in_place
+        disabled=cauti_in_place,
+        key="cauti_removal_date"
     )
 
-    # Optional: urine culture collection date (IWP anchor for UTI/CAUTI)
     st.markdown("**Microbiology timing (recommended for IWP accuracy)**")
     use_ucx_date = st.checkbox(
         "Specify urine culture collection date (IWP anchor)",
         value=True,
-        help=CAUTI_IWP_RULE
+        help=CAUTI_IWP_RULE,
+        key="cauti_use_ucx_date"
     )
     if use_ucx_date:
         cauti_ucx_date = st.date_input(
             "Urine culture collection date used for determination",
             value=cauti_eval_date,
-            help=CAUTI_IWP_RULE
+            help=CAUTI_IWP_RULE,
+            key="cauti_ucx_date"
         )
     else:
         cauti_ucx_date = None
 
-    # --- NHSN inference: if removed ON the assessment date, device WAS in place on that date ---
     if not cauti_in_place and cauti_removal_date and cauti_removal_date == cauti_eval_date:
         cauti_in_place = True  # infer in place on assessment date
 
-    # --- Validate & compute device days (non-blocking) ---
     problems = []
     effective_end = cauti_eval_date if cauti_in_place else cauti_removal_date
 
@@ -395,13 +422,11 @@ def render_cauti_tab():
     cauti_days = inclusive_days(cauti_insertion_date, effective_end)
     cauti_eligible_days = cauti_days > 2  # Eligible starting Day 3
 
-    # Device association: in place on assessment date OR removed yesterday
     if cauti_in_place:
         cauti_device_associated = True
     else:
         cauti_device_associated = (cauti_removal_date == cauti_eval_date - dt.timedelta(days=1))
 
-    # IWP anchor for CAUTI (urine culture preferred; fallback to assessment date)
     cauti_iwp_anchor = cauti_ucx_date or cauti_eval_date
     cauti_iwp_label = iwp_range_text(cauti_iwp_anchor)
 
@@ -413,38 +438,36 @@ def render_cauti_tab():
         "the catheter has been removed."
     )
 
-    # Temperature entry in °F; strict rule > 38 °C after converting
     u_temp_f = st.number_input(
         f"Highest documented temperature during IWP? (°F)  (> 100.4 °F / > 38 °C) {cauti_iwp_label}",
         min_value=80.0, max_value=113.0, value=98.6, step=0.1, format="%.1f",
-        help=TEMP_RULE
+        help=TEMP_RULE,
+        key="cauti_temp_f"
     )
     u_temp_c = f_to_c(u_temp_f)
     st.caption(f"Entered temperature ≈ **{u_temp_c:.1f} °C**")
     fever_u = (u_temp_c > 38.0)
 
-    # Symptoms (respect catheter status on assessment date)
     suprapubic = (
-        st.radio(f"Suprapubic tenderness? {cauti_iwp_label}", ["Yes", "No"], help=CAUTI_IWP_RULE) == "Yes"
+        st.radio(f"Suprapubic tenderness? {cauti_iwp_label}", ["Yes", "No"], help=CAUTI_IWP_RULE, key="cauti_suprapubic") == "Yes"
     )
     cva = (
-        st.radio(f"CVA pain/tenderness? {cauti_iwp_label}", ["Yes", "No"], help=CAUTI_IWP_RULE) == "Yes"
+        st.radio(f"CVA pain/tenderness? {cauti_iwp_label}", ["Yes", "No"], help=CAUTI_IWP_RULE, key="cauti_cva") == "Yes"
     )
 
     urgency_raw = (
         st.radio(f"Urinary urgency? {cauti_iwp_label}", ["Yes", "No"],
-                 help="Only eligible after catheter removal; exclude when IUC is in place.") == "Yes"
+                 help="Only eligible after catheter removal; exclude when IUC is in place.", key="cauti_urgency") == "Yes"
     )
     frequency_raw = (
         st.radio(f"Urinary frequency? {cauti_iwp_label}", ["Yes", "No"],
-                 help="Only eligible after catheter removal; exclude when IUC is in place.") == "Yes"
+                 help="Only eligible after catheter removal; exclude when IUC is in place.", key="cauti_frequency") == "Yes"
     )
     dysuria_raw = (
         st.radio(f"Dysuria? {cauti_iwp_label}", ["Yes", "No"],
-                 help="Only eligible after catheter removal; exclude when IUC is in place.") == "Yes"
+                 help="Only eligible after catheter removal; exclude when IUC is in place.", key="cauti_dysuria") == "Yes"
     )
 
-    # Enforce NHSN symptom eligibility based on catheter status on assessment date
     if cauti_in_place:
         urgency = frequency = dysuria = False
         st.info("Catheter is in place on the assessment date: urgency, frequency, and dysuria are excluded by NHSN.")
@@ -455,14 +478,13 @@ def render_cauti_tab():
         st.radio(
             "Positive urine culture?",
             ["Yes", "No"],
-            help="Positive urine culture is required (with device eligibility and association) to meet CAUTI criteria."
+            help="Positive urine culture is required (with device eligibility and association) to meet CAUTI criteria.",
+            key="cauti_positive_ucx"
         ) == "Yes"
     )
 
-    # Any eligible symptom (depending on catheter status)
     u_symptom_any = any([fever_u, suprapubic, cva, urgency, frequency, dysuria])
 
-    # ====== Criteria determination (CAUTI) ======
     meets_cauti_criteria = (
         positive_ucx and
         cauti_eligible_days and
@@ -470,7 +492,6 @@ def render_cauti_tab():
         u_symptom_any
     )
 
-    # Output
     st.subheader("CAUTI Results")
     st.markdown(f"Insertion date: **{cauti_insertion_date.isoformat()}**")
     st.markdown(f"Assessment date: **{cauti_eval_date.isoformat()}**")
@@ -485,7 +506,6 @@ def render_cauti_tab():
     st.markdown(f"NHSN catheter-day eligibility (> 2 consecutive calendar days): **{cauti_eligible_days}**")
     st.markdown(f"Device association (in place on assessment date or removed yesterday): **{cauti_device_associated}**")
 
-    # Three-state highlighting
     if meets_cauti_criteria:
         st.error("Patient **meets** NHSN CAUTI Criteria (as of assessment date).")
     elif u_symptom_any:
@@ -493,7 +513,6 @@ def render_cauti_tab():
     else:
         st.success("Patient **does not meet** NHSN CAUTI Criteria (as of assessment date).")
 
-    # Diagnostics: why not criteria?
     if not meets_cauti_criteria:
         reasons = []
         if not positive_ucx: reasons.append("No positive urine culture.")
@@ -511,26 +530,14 @@ tab_clabsi, tab_cauti, tab_blood, tab_urine = st.tabs(
     ["CLABSI", "CAUTI", "Blood Culture Escalation", "Urine Culture Escalation"]
 )
 
-# =========================
-# ========= CLABSI ========
-# =========================
 with tab_clabsi:
     render_clabsi_tab()
 
-# =========================
-# ========= CAUTI =========
-# =========================
 with tab_cauti:
     render_cauti_tab()
 
-# =============================
-# == Blood Culture Escalation ==
-# =============================
 with tab_blood:
     render_blood_culture_escalation(BLOOD_LEADERSHIP_LABEL)
 
-# =============================
-# == Urine Culture Escalation ==
-# =============================
 with tab_urine:
     render_urine_culture_escalation(URINE_LEADERSHIP_LABEL)
