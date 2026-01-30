@@ -46,6 +46,9 @@ def iwp_range_text(anchor: Optional[dt.date]) -> str:
 def c_to_f(c: float) -> float:
     return (c * 9/5) + 32
 
+def f_to_c(f: float) -> float:
+    return (f - 32) * 5/9
+
 IWP_RULE = (
     "IWP = 7 days. The infection window period includes the date of the first positive diagnostic test "
     "used to meet the criterion plus the 3 calendar days before and the 3 calendar days after (anchor ±3)."
@@ -61,7 +64,8 @@ CAUTI_IWP_RULE = (
 )
 
 TEMP_RULE = (
-    "Use the highest documented temperature during the IWP. Fever threshold is strictly > 38 °C (> 100.4 °F)."
+    "Enter the highest documented temperature during the IWP in °F. Fever threshold is strictly > 38 °C (> 100.4 °F). "
+    "The app converts °F → °C and applies the strict > 38 °C rule."
 )
 
 # =========================
@@ -152,13 +156,14 @@ with tab_clabsi:
     cl_iwp_label = iwp_range_text(cl_iwp_anchor)
 
     # --- Clinical inputs with IWP shown ---
-    # Numeric temperature input (strictly > 38 °C)
-    cl_temp_c = st.number_input(
-        f"Highest documented temperature during IWP? (°C)  (> 38 °C / > 100.4 °F) {cl_iwp_label}",
-        min_value=30.0, max_value=45.0, value=37.0, step=0.1, format="%.1f",
+    # Temperature entry in °F; logic uses > 38 °C after converting
+    cl_temp_f = st.number_input(
+        f"Highest documented temperature during IWP? (°F)  (> 100.4 °F / > 38 °C) {cl_iwp_label}",
+        min_value=80.0, max_value=113.0, value=98.6, step=0.1, format="%.1f",
         help=TEMP_RULE
     )
-    st.caption(f"Entered temperature ≈ **{c_to_f(cl_temp_c):.1f} °F**")
+    cl_temp_c = f_to_c(cl_temp_f)
+    st.caption(f"Entered temperature ≈ **{cl_temp_c:.1f} °C**")
     cl_fever = (cl_temp_c > 38.0)
 
     # Additional clinical context (not required for CLABSI criterion)
@@ -320,13 +325,14 @@ with tab_cauti:
         "the catheter has been removed."
     )
 
-    # --- Numeric temperature input (strict > 38 °C threshold) ---
-    u_temp_c = st.number_input(
-        f"Highest documented temperature during IWP? (°C)  (> 38 °C / > 100.4 °F) {cauti_iwp_label}",
-        min_value=30.0, max_value=45.0, value=37.0, step=0.1, format="%.1f",
+    # --- Temperature entry in °F; strict rule > 38 °C after converting ---
+    u_temp_f = st.number_input(
+        f"Highest documented temperature during IWP? (°F)  (> 100.4 °F / > 38 °C) {cauti_iwp_label}",
+        min_value=80.0, max_value=113.0, value=98.6, step=0.1, format="%.1f",
         help=TEMP_RULE
     )
-    st.caption(f"Entered temperature ≈ **{c_to_f(u_temp_c):.1f} °F**")
+    u_temp_c = f_to_c(u_temp_f)
+    st.caption(f"Entered temperature ≈ **{u_temp_c:.1f} °C**")
     fever_u = (u_temp_c > 38.0)
 
     # --- Symptoms (respect catheter status on assessment date) ---
@@ -408,3 +414,4 @@ with tab_cauti:
         if not u_symptom_any: reasons.append("No eligible symptom within IWP.")
         if reasons:
             st.caption("Reason(s) criteria not met: " + " ".join(reasons))
+``
