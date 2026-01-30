@@ -1,6 +1,6 @@
 import streamlit as st
 import datetime as dt
-from typing import Optional
+from typing import Optional, List
 
 # ------------------------------------------------------------
 # CLABSI & CAUTI Risk Calculator (NHSN-aligned device-day logic)
@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # ===== Leadership wording (single place to change) =====
-BLOOD_LEADERSHIP_LABEL = "Unit Leadership"   # change to "Unit Leadership" if desired
+BLOOD_LEADERSHIP_LABEL = "TIMC Leadership"   # change to "Unit Leadership" if desired
 URINE_LEADERSHIP_LABEL = "Unit Leadership"   # per your request
 
 st.title("💉 CLABSI & CAUTI Risk Calculator")
@@ -50,6 +50,20 @@ def c_to_f(c: float) -> float:
 
 def f_to_c(f: float) -> float:
     return (f - 32) * 5/9
+
+def show_errors(errors: List[str]) -> None:
+    for e in errors:
+        st.error(e)
+
+def invalid_dates_guard(problems: List[str]) -> bool:
+    """
+    Non-blocking guard. Shows errors and returns True if invalid.
+    IMPORTANT: We do NOT call st.stop() anywhere so other tabs still render.
+    """
+    if problems:
+        show_errors(problems)
+        return True
+    return False
 
 IWP_RULE = (
     "IWP = 7 days. The infection window period includes the date of the first positive diagnostic test "
@@ -141,21 +155,21 @@ def render_urine_culture_escalation(leadership_label: str = URINE_LEADERSHIP_LAB
             "- Is there another identifiable source of infection?"
         )
 
-# ============================================================
-# ======================= MAIN TABS ==========================
-# ============================================================
-tab_clabsi, tab_cauti, tab_blood, tab_urine = st.tabs(
-    ["CLABSI", "CAUTI", "Blood Culture Escalation", "Urine Culture Escalation"]
-)
-
-# =========================
-# ========= CLABSI ========
-# =========================
-with tab_clabsi:
+# --------------------------
+# Calculator tabs as functions (no st.stop) + opt-in entry
+# --------------------------
+def render_clabsi_tab():
     st.header("CLABSI")
     st.write("Enter patient information to calculate CLABSI risk and determine if CLABSI criteria are met.")
 
-    # --- Dates & device presence/removal ---
+    # Gate calculations until the user explicitly opts in
+    enable = st.toggle("Enter dates now", value=False, help="Turn on to input dates and run the calculator.")
+    if not enable:
+        st.info("Turn on **Enter dates now** to input dates. Other tabs (including Escalation) remain available.")
+        return
+
+    # NOTE: If your Streamlit version supports value=None for date_input, you can switch to value=None
+    # to force explicit selection. Keeping today avoids version incompatibilities.
     cl_insertion_date = st.date_input(
         "Central line insertion date",
         value=dt.date.today(),
@@ -206,7 +220,7 @@ with tab_clabsi:
     if not cl_in_place and cl_removal_date and cl_removal_date == cl_eval_date:
         cl_in_place = True  # infer in place on assessment date
 
-    # --- Validate & compute device days ---
+    # --- Validate & compute device days (non-blocking) ---
     problems = []
     cl_effective_end = cl_eval_date if cl_in_place else (cl_removal_date or cl_eval_date)
 
@@ -215,10 +229,8 @@ with tab_clabsi:
     if cl_insertion_date > cl_effective_end:
         problems.append("Insertion date cannot be after the removal/assessment date.")
 
-    if problems:
-        for p in problems:
-            st.error(p)
-        st.stop()
+    if invalid_dates_guard(problems):
+        return  # do NOT stop app; just end this tab's logic
 
     cl_days = inclusive_days(cl_insertion_date, cl_effective_end)
     cl_eligible = cl_days > 2  # Eligible starting Day 3
@@ -236,7 +248,6 @@ with tab_clabsi:
     cl_iwp_label = iwp_range_text(cl_iwp_anchor)
 
     # --- Clinical inputs with IWP shown ---
-    # Temperature entry in °F; logic uses > 38 °C after converting
     cl_temp_f = st.number_input(
         f"Highest documented temperature during IWP? (°F)  (> 100.4 °F / > 38 °C) {cl_iwp_label}",
         min_value=80.0, max_value=113.0, value=98.6, step=0.1, format="%.1f",
@@ -270,14 +281,11 @@ with tab_clabsi:
         ) == "Yes"
     )
 
-    # Build an 'at risk' signal for CLABSI based on symptoms (even though symptoms are not required to meet CLABSI)
+    # Symptoms signal (even though not required to meet CLABSI)
     cl_symptom_any = cl_fever or hypotension or chills
 
     # ====== Criteria determination (CLABSI) ======
-    # NHSN CLABSI (adult): positive blood culture + eligible device days + device-associated.
-    meets_clabsi_criteria = (
-        positive_bcx and cl_eligible and cl_device_associated
-    )
+    meets_clabsi_criteria = (positive_bcx and cl_eligible and cl_device_associated)
 
     # Output
     st.subheader("CLABSI Results")
@@ -288,13 +296,12 @@ with tab_clabsi:
     if cl_bcx_date:
         st.markdown(f"First positive blood culture date (IWP anchor): **{cl_bcx_date.isoformat()}**")
 
-    st.markdown(f"IWP for symptom eligibility: **{iwp_range_text(cl_iwp_anchor)}** "
-                "(7 day window: anchor date ± 3 days)")
+    st.markdown(f"IWP for symptom eligibility: **{iwp_range_text(cl_iwp_anchor)}** (7 day window: anchor date ± 3 days)")
     st.markdown(f"Central line days (calendar days): **{cl_days}**")
     st.markdown(f"NHSN device-day eligibility (>2 consecutive calendar days): **{cl_eligible}**")
     st.markdown(f"Device association (in place on assessment date or removed yesterday): **{cl_device_associated}**")
 
-    # Three-state highlighting: Red (meets), Yellow (at risk with symptoms), Green (does not meet and no symptoms)
+    # Three-state highlighting
     if meets_clabsi_criteria:
         st.error("Patient **meets** NHSN CLABSI Criteria (as of assessment date).")
     elif cl_symptom_any:
@@ -311,14 +318,17 @@ with tab_clabsi:
         if reasons:
             st.caption("Reason(s) criteria not met: " + " ".join(reasons))
 
-# =========================
-# ========= CAUTI =========
-# =========================
-with tab_cauti:
+def render_cauti_tab():
     st.header("CAUTI")
     st.write("Enter urinary catheter information and symptoms for CAUTI risk and determination.")
 
-    # --- Dates & device presence/removal ---
+    # Gate calculations until the user explicitly opts in
+    enable = st.toggle("Enter dates now", value=False, help="Turn on to input dates and run the calculator.")
+    if not enable:
+        st.info("Turn on **Enter dates now** to input dates. Other tabs (including Escalation) remain available.")
+        return
+
+    # If your Streamlit supports empty date pickers, you can use value=None for both inputs.
     cauti_insertion_date = st.date_input(
         "Indwelling urinary catheter insertion date",
         value=dt.date.today(),
@@ -370,7 +380,7 @@ with tab_cauti:
     if not cauti_in_place and cauti_removal_date and cauti_removal_date == cauti_eval_date:
         cauti_in_place = True  # infer in place on assessment date
 
-    # --- Validate & compute device days ---
+    # --- Validate & compute device days (non-blocking) ---
     problems = []
     effective_end = cauti_eval_date if cauti_in_place else cauti_removal_date
 
@@ -379,10 +389,8 @@ with tab_cauti:
     if cauti_insertion_date > effective_end:
         problems.append("Insertion date cannot be after the removal/assessment date.")
 
-    if problems:
-        for p in problems:
-            st.error(p)
-        st.stop()
+    if invalid_dates_guard(problems):
+        return  # do NOT stop app; just end this tab's logic
 
     cauti_days = inclusive_days(cauti_insertion_date, effective_end)
     cauti_eligible_days = cauti_days > 2  # Eligible starting Day 3
@@ -405,7 +413,7 @@ with tab_cauti:
         "the catheter has been removed."
     )
 
-    # --- Temperature entry in °F; strict rule > 38 °C after converting ---
+    # Temperature entry in °F; strict rule > 38 °C after converting
     u_temp_f = st.number_input(
         f"Highest documented temperature during IWP? (°F)  (> 100.4 °F / > 38 °C) {cauti_iwp_label}",
         min_value=80.0, max_value=113.0, value=98.6, step=0.1, format="%.1f",
@@ -415,7 +423,7 @@ with tab_cauti:
     st.caption(f"Entered temperature ≈ **{u_temp_c:.1f} °C**")
     fever_u = (u_temp_c > 38.0)
 
-    # --- Symptoms (respect catheter status on assessment date) ---
+    # Symptoms (respect catheter status on assessment date)
     suprapubic = (
         st.radio(f"Suprapubic tenderness? {cauti_iwp_label}", ["Yes", "No"], help=CAUTI_IWP_RULE) == "Yes"
     )
@@ -477,7 +485,7 @@ with tab_cauti:
     st.markdown(f"NHSN catheter-day eligibility (> 2 consecutive calendar days): **{cauti_eligible_days}**")
     st.markdown(f"Device association (in place on assessment date or removed yesterday): **{cauti_device_associated}**")
 
-    # Three-state highlighting: Red (meets), Yellow (at risk with symptoms), Green (does not meet and no symptoms)
+    # Three-state highlighting
     if meets_cauti_criteria:
         st.error("Patient **meets** NHSN CAUTI Criteria (as of assessment date).")
     elif u_symptom_any:
@@ -494,6 +502,26 @@ with tab_cauti:
         if not u_symptom_any: reasons.append("No eligible symptom within IWP.")
         if reasons:
             st.caption("Reason(s) criteria not met: " + " ".join(reasons))
+
+
+# ============================================================
+# ======================= MAIN TABS ==========================
+# ============================================================
+tab_clabsi, tab_cauti, tab_blood, tab_urine = st.tabs(
+    ["CLABSI", "CAUTI", "Blood Culture Escalation", "Urine Culture Escalation"]
+)
+
+# =========================
+# ========= CLABSI ========
+# =========================
+with tab_clabsi:
+    render_clabsi_tab()
+
+# =========================
+# ========= CAUTI =========
+# =========================
+with tab_cauti:
+    render_cauti_tab()
 
 # =============================
 # == Blood Culture Escalation ==
