@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # ===== Leadership wording (single place to change) =====
-BLOOD_LEADERSHIP_LABEL = "TIMC Leadership"   # change to "Unit Leadership" if desired
+BLOOD_LEADERSHIP_LABEL = "Unit Leadership"   # change to "Unit Leadership" if desired
 URINE_LEADERSHIP_LABEL = "Unit Leadership"   # per your request
 
 st.title("💉 CLABSI & CAUTI Risk Calculator")
